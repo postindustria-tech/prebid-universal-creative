@@ -17,7 +17,7 @@ module.exports = {
     rules: [
       {
         test: /\.js$/,
-        exclude: path.resolve('./node_modules'), // required to prevent loader from choking non-Prebid.js node_modules
+        exclude: /node_modules\/(?!(postscribe|prescribe))/, // Process postscribe and prescribe from local checkouts
         use: [
           {
             loader: 'babel-loader',
