@@ -5,13 +5,16 @@ export function writeAdHtml(markup, ps = postscribe) {
     // https://github.com/prebid/prebid-universal-creative/issues/134
     markup = markup.replace(/\<(\?xml|(\!DOCTYPE[^\>\[]+(\[[^\]]+)?))+[^>]+\>/gi, '');
 
+    let finalMarkup;
+
     try {
-        markup = normalizeMarkup(markup);
+        finalMarkup = normalizeMarkup(markup);
     } catch (error) {
         console.error("Error normalizing markup:", error.message);
+        finalMarkup = markup;
     }
 
-    ps(document.body, markup, {
+    ps(document.body, finalMarkup, {
         error: console.error
     });
 }
@@ -23,22 +26,44 @@ export function writeAdHtml(markup, ps = postscribe) {
  * This function is specifically aimed at addressing an issue with `postscribe` where double quotes inside single-quoted
  * HTML attributes are not correctly escaped.
  */
- function normalizeMarkup(markup) {
-    const startMarker = '<div id="PUC_START"></div>';
-    const endMarker = '<div id="PUC_END"></div>';
+function normalizeMarkup(markup) {
+    const timestamp = Date.now();
+    const startMarkerId = `PUC_START_${timestamp}`;
+    const endMarkerId = `PUC_END_${timestamp}`;
+    const startMarker = `<div id="${startMarkerId}"></div>`;
+    const endMarker = `<div id="${endMarkerId}"></div>`;
+    const doc = new DOMParser().parseFromString(`${startMarker}${markup}${endMarker}`, "text/html");
 
-    const wrapped = `${startMarker}${markup}${endMarker}`;
+    const textMap = new Map();
+    let textId = 0;
 
-    const doc = new DOMParser().parseFromString(wrapped, "text/html");
-    const serialized = new XMLSerializer().serializeToString(doc);
+    const replaceTextNodes = (node) => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const id = `PUC_NODE_TEXT_${textId++}_${timestamp}`;
+            textMap.set(id, node.textContent);
+            const span = doc.createElement("span");
+            span.dataset.textId = id;
+            node.parentNode.replaceChild(span, node);
+        } else {
+            [...node.childNodes].forEach(replaceTextNodes);
+        }
+    };
 
-    const startIndex = serialized.indexOf(startMarker);
-    const endIndex = serialized.indexOf(endMarker, startIndex);
-
-    if (startIndex === -1 || endIndex === -1) {
-        throw new Error("PUC markers not found in serialized output");
+    let current = doc.querySelector(`#${startMarkerId}`).nextSibling;
+    const end = doc.querySelector(`#${endMarkerId}`);
+    while (current && current !== end) {
+        replaceTextNodes(current);
+        current = current.nextSibling;
     }
 
-    const snippet = serialized.substring(startIndex + startMarker.length, endIndex);
+    const serialized = new XMLSerializer().serializeToString(doc);
+    const snippet = serialized
+        .split(startMarker)[1]
+        .split(endMarker)[0]
+        .replace(
+            /<span data-text-id="(PUC_NODE_TEXT_\d+_\d+)"[^>]*><\/span>/g,
+            (_, id) => textMap.get(id) || ""
+        );
+
     return snippet.trim();
 }
