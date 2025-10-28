@@ -1,4 +1,4 @@
-import postscribe from 'postscribe';
+import postscribe from 'postscribe/src/postscribe';
 
 export function writeAdHtml(markup, ps = postscribe) {
     // remove <?xml> and <!doctype> tags

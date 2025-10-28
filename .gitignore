@@ -5,3 +5,4 @@ coverage
 dist/
 postscribe/node_modules/
 prescribe/node_modules/
+.idea
