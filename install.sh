@@ -3,6 +3,7 @@
 set -e
 
 ### Option one (local)
+rm -rf dist
 echo "BUILD: Prescribe..."
 cd prescribe
 npm install
