@@ -16,6 +16,8 @@ const DEFAULT_CACHE_PATH = '/pbc/v1/cache';
  * @param {Bool} isMobileApp flag to detect mobile app
  */
 export function renderAmpOrMobileAd(dataObject) {
+  loadGoogleAppEventsScript();
+
   const targetingData = transformAuctionTargetingData(dataObject);
   let { cacheHost, cachePath, uuid, size, hbPb } = targetingData;
   uuid = uuid || '';
@@ -234,4 +236,16 @@ function registerMRAIDViewableEvent(callback) {
   } else {
     return false;
   }
+}
+
+/**
+ * Downloads Google App Events script.
+ * See: https://developers.google.com/ad-manager/mobile-ads-sdk/ios/banner#app_events
+ */
+function loadGoogleAppEventsScript() {
+    new Promise(() => {
+        const script = document.createElement('script');
+        script.src = 'https://www.gstatic.com/afma/api/v1/google_mobile_app_ads.js';
+        document.head.appendChild(script);
+    }).then(() => {})
 }
