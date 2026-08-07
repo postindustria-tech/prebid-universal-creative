@@ -58,20 +58,50 @@ function decodeHtmlAttribute(value) {
 }
 
 /**
- * Re-serializes the markup through the browser so postscribe receives
- * canonical HTML (double-quoted attributes, escaped entities, balanced tags).
- * postscribe mangles anything else, e.g. double quotes inside single-quoted
- * attribute values (https://github.com/prebid/prebid-universal-creative/pull/358).
+ * Normalizes an HTML string by parsing and re-serializing it,
+ * returning the content between custom PUC_START and PUC_END markers.
  *
- * The unique marker element switches the parser into <body> mode up front, so
- * the whole adm — including leading comments and scripts that would otherwise
- * be scattered into <head> or the document root — is parsed as body content,
- * matching how postscribe writes it into document.body. The marker is then
- * removed and the body serialized.
+ * This function is specifically aimed at addressing an issue with `postscribe` where double quotes inside single-quoted
+ * HTML attributes are not correctly escaped.
  */
 function normalizeMarkup(markup) {
-    const markerId = `PUC_MARKER_${Date.now()}`;
-    const doc = new DOMParser().parseFromString(`<div id="${markerId}"></div>${markup}`, 'text/html');
-    doc.getElementById(markerId).remove();
-    return doc.body.innerHTML.trim();
+    const timestamp = Date.now();
+    const startMarkerId = `PUC_START_${timestamp}`;
+    const endMarkerId = `PUC_END_${timestamp}`;
+    const startMarker = `<div id="${startMarkerId}"></div>`;
+    const endMarker = `<div id="${endMarkerId}"></div>`;
+    const doc = new DOMParser().parseFromString(`${startMarker}${markup}${endMarker}`, "text/html");
+
+    const textMap = new Map();
+    let textId = 0;
+
+    const replaceTextNodes = (node) => {
+        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+            const id = `PUC_NODE_TEXT_${textId++}_${timestamp}`;
+            textMap.set(id, node.textContent);
+            const span = doc.createElement("span");
+            span.dataset.textId = id;
+            node.parentNode.replaceChild(span, node);
+        } else {
+            [...node.childNodes].forEach(replaceTextNodes);
+        }
+    };
+
+    let current = doc.querySelector(`#${startMarkerId}`).nextSibling;
+    const end = doc.querySelector(`#${endMarkerId}`);
+    while (current && current !== end) {
+        replaceTextNodes(current);
+        current = current.nextSibling;
+    }
+
+    const serialized = new XMLSerializer().serializeToString(doc);
+    const snippet = serialized
+        .split(startMarker)[1]
+        .split(endMarker)[0]
+        .replace(
+            /<span data-text-id="(PUC_NODE_TEXT_\d+_\d+)"[^>]*><\/span>/g,
+            (_, id) => textMap.get(id) || ""
+        );
+
+    return snippet.trim();
 }
