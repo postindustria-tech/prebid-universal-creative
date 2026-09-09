@@ -17,8 +17,46 @@ export function writeAdHtml(markup, ps = postscribe) {
     }
 
     ps(document.body, finalMarkup, {
-        error: console.error
+        error: console.error,
+        beforeWriteToken: decodeEntitiesInMaterializedTokens
     });
+}
+
+/**
+ * postscribe builds <script> and <style> elements by hand instead of writing
+ * them through the browser's HTML parser: see _buildScript/_buildStyle in
+ * postscribe's src/write-stream.js, which copy raw tokenizer output via
+ * el.setAttribute(name, value) and el.src = tok.src. Entities in their
+ * attributes are therefore never decoded — e.g. `src="...a=1&amp;b=2"` would
+ * be requested literally, breaking tracker URLs. Decode them here, as a
+ * browser would.
+ */
+function decodeEntitiesInMaterializedTokens(tok) {
+    const tagName = tok && tok.tagName && tok.tagName.toLowerCase();
+    if ((tagName === 'script' || tagName === 'style') && tok.attrs) {
+        Object.keys(tok.attrs).forEach((name) => {
+            if (typeof tok.attrs[name] === 'string' && tok.attrs[name].indexOf('&') !== -1) {
+                tok.attrs[name] = decodeHtmlAttribute(tok.attrs[name]);
+            }
+        });
+        // postscribe copies attrs.src to tok.src before this hook runs
+        if (typeof tok.src === 'string' && tok.src.indexOf('&') !== -1) {
+            tok.src = decodeHtmlAttribute(tok.src);
+        }
+    }
+    return tok;
+}
+
+/**
+ * Decodes HTML entities by round-tripping the value through a real parsed
+ * attribute. This matches browser rules for attributes exactly: `&amp;`
+ * becomes `&`, but semicolon-less references like `&notify=` stay literal.
+ */
+function decodeHtmlAttribute(value) {
+    const doc = new DOMParser().parseFromString(
+        `<i data-v="${value.replace(/"/g, '&quot;')}">`, 'text/html'
+    );
+    return doc.body.firstChild.getAttribute('data-v');
 }
 
 /**

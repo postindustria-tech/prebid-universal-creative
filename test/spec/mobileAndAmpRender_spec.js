@@ -273,7 +273,7 @@ describe('writeAdHtml', () => {
 
     const img = document.querySelector('img:last-of-type');
     if (img) {
-      console.log('Output:', img.outerHTML);
+      console.log('Output: ', img.outerHTML);
       console.log('Title: ', img.getAttribute('title'));
 
       const expected = 'uh "oh" > this should all be inside the title attribute';
@@ -298,5 +298,101 @@ describe('writeAdHtml', () => {
       const parsed = JSON.parse(dataJson);
       expect(parsed.key).to.equal('value');
     }
+  });
+
+  // postscribe queues streams and blocks on pending external scripts, so
+  // output from a previous writeAdHtml call may be written asynchronously
+  function waitFor(condition, description) {
+    return new Promise((resolve, reject) => {
+      const started = Date.now();
+      (function poll() {
+        const result = condition();
+        if (result) {
+          resolve(result);
+        } else if (Date.now() - started > 5000) {
+          reject(new Error(`Timed out waiting for ${description}`));
+        } else {
+          setTimeout(poll, 10);
+        }
+      })();
+    });
+  }
+
+  function waitForScript(marker) {
+    return waitFor(
+      () => document.querySelector(`script[data-puc-test="${marker}"]`),
+      `script[data-puc-test="${marker}"]`
+    );
+  }
+
+  it('should not leave &amp; in a script src URL', () => {
+    const input = '<script data-puc-test="raw-amp" src="/base/test/fake-tracker?anId=8095&pubId=215421&bi=abc123"></script>';
+
+    writeAdHtml(input);
+
+    return waitForScript('raw-amp').then((script) => {
+      expect(script.getAttribute('src')).to.contain('anId=8095&pubId=215421&bi=abc123');
+      expect(script.getAttribute('src')).to.not.contain('&amp;');
+    });
+  });
+
+  it('should decode &amp; already present in the adm script src', () => {
+    const input = '<script data-puc-test="encoded-amp" src="/base/test/fake-tracker?a=1&amp;b=2"></script>';
+
+    writeAdHtml(input);
+
+    return waitForScript('encoded-amp').then((script) => {
+      expect(script.getAttribute('src')).to.contain('a=1&b=2');
+      expect(script.getAttribute('src')).to.not.contain('&amp;');
+    });
+  });
+
+  it('should not decode legacy semicolon-less entities in script src', () => {
+    const input = '<script data-puc-test="legacy-entities" src="/base/test/fake-tracker?x=1&notify=true&copy=2"></script>';
+
+    writeAdHtml(input);
+
+    return waitForScript('legacy-entities').then((script) => {
+      const src = script.getAttribute('src');
+      expect(src).to.contain('&notify=true');
+      expect(src).to.contain('&copy=2');
+      expect(src).to.not.contain('¬'); // ¬ from &not
+      expect(src).to.not.contain('©'); // © from &copy
+    });
+  });
+
+  it('should preserve the leading creative comment', () => {
+    const ps = sinon.stub();
+    const comment = '<!--Creative 123 served by Prebid.js Header Bidding-->';
+
+    writeAdHtml(`${comment}<div>ad</div>`, ps);
+
+    const written = ps.args[0][1];
+    expect(written.indexOf(comment)).to.equal(0);
+    expect(written).to.contain('<div>ad</div>');
+  });
+
+  it('should not corrupt inline script content containing && and <', () => {
+    const input = '<script>window.testInlineResult = (1 < 2) && "a&b";</script>';
+
+    writeAdHtml(input);
+
+    return waitFor(() => window.testInlineResult, 'inline script execution').then((result) => {
+      expect(result).to.equal('a&b');
+      window.testInlineResult = undefined;
+    });
+  });
+
+  it('should preserve text content with entities and ampersands', () => {
+    const input = '<div data-puc-test="text-content">Tom & Jerry &amp; friends</div>';
+
+    writeAdHtml(input);
+
+    return waitFor(
+      () => document.querySelector('div[data-puc-test="text-content"]'),
+      'text content div'
+    ).then((div) => {
+      expect(div.textContent).to.equal('Tom & Jerry & friends');
+    });
   });
 })
